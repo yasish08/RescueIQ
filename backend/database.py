@@ -18,5 +18,5 @@ def get_supabase():
             from supabase import create_client
             _supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
         except Exception as e:
-            print(f"[WARNING] Supabase init failed: {e}. Running with mock data.")
+            print(f"[WARNING] Supabase init failed: {e}.")
     return _supabase_client

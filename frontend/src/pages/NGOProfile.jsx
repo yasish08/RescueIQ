@@ -465,13 +465,11 @@ export default function NGOProfile() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '1rem' }}>
           <FiShield color="#c084fc" size={18} />
           <h2 style={{ fontWeight: 700, fontSize: '1.05rem' }}>
-            NGO Certificate Verification <span style={{ fontSize: '0.72rem', color: '#475569', fontWeight: 500 }}>(Mock Validator)</span>
+            NGO Certificate Verification
           </h2>
         </div>
         <p style={{ color: '#64748b', fontSize: '0.85rem', marginBottom: '1rem', lineHeight: 1.6 }}>
-          Enter your NGO registration certificate number. Use{' '}
-          <code style={{ color: '#c084fc', background: 'rgba(192,132,252,0.1)', padding: '1px 6px', borderRadius: 4 }}>NGO/12345678/2024</code>{' '}
-          for a demo pass.
+          Enter your NGO registration certificate number to validate format.
         </p>
         <div style={{ display: 'flex', gap: 8 }}>
           <input

@@ -1,5 +1,5 @@
 """
-Profile router — restaurant / NGO profile management + mock credential verification
+Profile router — restaurant / NGO profile management + credential format verification
 """
 import re
 
@@ -34,12 +34,9 @@ def _is_valid_coord(lat, lng) -> bool:
     return True
 
 
-# ── Mock validators ──────────────────────────────────────
+# ── Validators ───────────────────────────────────────────
 GSTIN_REGEX = re.compile(r"^\d{2}[A-Z]{5}\d{4}[A-Z]\d[A-Z]\d$")
 CERTIFICATE_REGEX = re.compile(r"^[A-Z]{2,5}/\d{4,8}/\d{4}$")
-
-GSTIN_ALLOW_LIST = {"22AAAAA0000A1Z5", "07BBBBB1111B2Y4", "29CCCCC2222C3X3"}
-CERT_ALLOW_LIST = {"NGO/12345678/2024", "FCRA/00987654/2023", "CSR/11223344/2025"}
 
 
 class GSTINVerify(BaseModel):
@@ -326,19 +323,16 @@ def update_ngo_profile(user_id: str, body: NGOUpdate):
         db.close()
 
 
-# ── Mock credential verification ─────────────────────────
+# ── Credential format verification ───────────────────────
 @router.post("/verify-gstin")
 def verify_gstin(body: GSTINVerify):
     gstin = body.gstin.strip().upper()
     fmt_valid = bool(GSTIN_REGEX.match(gstin))
-    in_list = gstin in GSTIN_ALLOW_LIST
     return {
         "gstin": gstin,
         "format_valid": fmt_valid,
-        "verified": fmt_valid and in_list,
-        "message": "✅ GSTIN verified (mock)" if (fmt_valid and in_list) else (
-            "⚠️ GSTIN format valid but not in mock registry" if fmt_valid else "❌ Invalid GSTIN format"
-        ),
+        "verified": fmt_valid,
+        "message": "✅ GSTIN format valid" if fmt_valid else "❌ Invalid GSTIN format",
     }
 
 
@@ -346,12 +340,9 @@ def verify_gstin(body: GSTINVerify):
 def verify_certificate(body: CertVerify):
     cert = body.certificate_number.strip().upper()
     fmt_valid = bool(CERTIFICATE_REGEX.match(cert))
-    in_list = cert in CERT_ALLOW_LIST
     return {
         "certificate_number": cert,
         "format_valid": fmt_valid,
-        "verified": fmt_valid and in_list,
-        "message": "✅ Certificate verified (mock)" if (fmt_valid and in_list) else (
-            "⚠️ Certificate format valid but not in mock registry" if fmt_valid else "❌ Invalid certificate format"
-        ),
+        "verified": fmt_valid,
+        "message": "✅ Certificate format valid" if fmt_valid else "❌ Invalid certificate format",
     }

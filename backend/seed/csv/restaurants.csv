@@ -1,6 +1,0 @@
-id,name,address,latitude,longitude,cuisine_type,avg_daily_covers,reliability_score,trust_rating,created_at
-1,Spice Garden,"12 MG Road, Bangalore",12.9716,77.5946,Indian,80,0.9,4.3,2026-03-05T15:53:26.076569+00:00
-2,Green Leaf Bistro,"45 Koramangala, Bangalore",12.9352,77.6245,Continental,60,0.85,3.1,2026-03-05T15:53:26.076591+00:00
-3,The Curry House,"7 Indiranagar, Bangalore",12.9784,77.6408,Indian,100,0.75,3.6,2026-03-05T15:53:26.076602+00:00
-4,Pizza Paradiso,"21 Whitefield, Bangalore",12.9698,77.7499,Italian,70,0.8,3.4,2026-03-05T15:53:26.076610+00:00
-5,Dosa Delight,"3 Jayanagar, Bangalore",12.9308,77.5838,South Indian,120,0.95,4.5,2026-03-05T15:53:26.076618+00:00

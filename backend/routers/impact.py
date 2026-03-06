@@ -1,25 +1,39 @@
 from fastapi import APIRouter
-from seed.mock_data import DONATIONS, IMPACT
+from datetime import datetime, timedelta
+from collections import defaultdict
+from models import Donation, DonationStatus, SessionLocal
 
 router = APIRouter(prefix="/impact", tags=["Impact"])
 
 
 def _calculate_live_impact():
-    delivered = [d for d in DONATIONS if d["status"] in ("delivered", "picked_up")]
-    meals = sum(d["food_quantity"] for d in delivered)
-    # Rough conversions: 1 meal ≈ 0.35 kg food, 0.35 kg food ≈ 0.57 kg CO2
+    db = SessionLocal()
+    try:
+        delivered = (
+            db.query(Donation)
+            .filter(Donation.status.in_([DonationStatus.DELIVERED, DonationStatus.PICKED_UP]))
+            .all()
+        )
+    finally:
+        db.close()
+
+    meals = sum(int(d.food_quantity or 0) for d in delivered)
     waste_kg = round(meals * 0.35, 1)
     co2_kg = round(waste_kg * 1.6, 1)
-    ngos = list({d["ngo_id"] for d in delivered if d.get("ngo_id")})
-    restaurants = list({d["restaurant_id"] for d in delivered})
+    ngos = {d.ngo_id for d in delivered if d.ngo_id}
+    restaurants = {d.restaurant_id for d in delivered if d.restaurant_id}
+
+    week_start = datetime.now() - timedelta(days=7)
+    donations_this_week = sum(1 for d in delivered if d.created_at and d.created_at >= week_start)
+
     return {
-        "meals_rescued": meals + IMPACT["meals_rescued"],
-        "food_waste_prevented_kg": waste_kg + IMPACT["food_waste_prevented_kg"],
-        "co2_reduced_kg": co2_kg + IMPACT["co2_reduced_kg"],
-        "ngos_supported": len(ngos) + IMPACT["ngos_supported"],
-        "restaurants_participating": len(restaurants) + IMPACT["restaurants_participating"],
-        "donations_this_week": len(delivered) + IMPACT["donations_this_week"],
-        "trees_equivalent": round((co2_kg + IMPACT["co2_reduced_kg"]) / 21, 1),
+        "meals_rescued": meals,
+        "food_waste_prevented_kg": waste_kg,
+        "co2_reduced_kg": co2_kg,
+        "ngos_supported": len(ngos),
+        "restaurants_participating": len(restaurants),
+        "donations_this_week": donations_this_week,
+        "trees_equivalent": round(co2_kg / 21, 1),
     }
 
 
@@ -30,15 +44,31 @@ def get_impact():
 
 @router.get("/timeline")
 def get_timeline():
-    """Return mock weekly breakdown for chart rendering."""
-    from datetime import datetime, timedelta
+    """Return weekly breakdown based on delivered/picked-up donations from DB."""
+    db = SessionLocal()
+    try:
+        delivered = (
+            db.query(Donation)
+            .filter(Donation.status.in_([DonationStatus.DELIVERED, DonationStatus.PICKED_UP]))
+            .all()
+        )
+    finally:
+        db.close()
+
+    weekly_meals = defaultdict(float)
+    for donation in delivered:
+        created_at = donation.created_at or datetime.now()
+        week_anchor = (created_at - timedelta(days=created_at.weekday())).date()
+        weekly_meals[week_anchor] += float(donation.food_quantity or 0)
+
     weeks = []
-    base_meals = 20
+    now = datetime.now()
     for i in range(8):
-        week_start = (datetime.now() - timedelta(weeks=7 - i)).strftime("%b %d")
-        meals = base_meals + i * 15 + (i % 3) * 5
+        week_date = (now - timedelta(weeks=7 - i))
+        week_anchor = (week_date - timedelta(days=week_date.weekday())).date()
+        meals = round(float(weekly_meals.get(week_anchor, 0.0)), 1)
         weeks.append({
-            "week": week_start,
+            "week": week_anchor.strftime("%b %d"),
             "meals_rescued": meals,
             "co2_reduced": round(meals * 0.35 * 1.6, 1),
             "waste_prevented": round(meals * 0.35, 1),

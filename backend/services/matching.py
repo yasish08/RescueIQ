@@ -1,15 +1,13 @@
 """
-Smart NGO Matching Algorithm using DB-first entities with seed fallback.
+Smart NGO Matching Algorithm using DB entities.
 Scores each NGO by weighted combination:
-  - Driving distance (inverse) weight 0.4
-  - Urgency score              weight 0.3
-  - Capacity ratio             weight 0.2
-  - Reliability score          weight 0.1
+    - Driving distance (inverse) weight 0.4
+    - Urgency score              weight 0.3
+    - Capacity ratio             weight 0.2
+    - Reliability score          weight 0.1
 """
-import copy
 
 from models import SessionLocal, Restaurant, NGO
-from seed.mock_data import NGOS, RESTAURANTS
 from services.google_maps import get_driving_distance_sync
 
 
@@ -17,52 +15,46 @@ def _get_restaurants():
     db = SessionLocal()
     try:
         rows = db.query(Restaurant).all()
-        if rows:
-            return [
-                {
-                    "id": r.id,
-                    "name": r.name,
-                    "latitude": r.latitude,
-                    "longitude": r.longitude,
-                    "avg_daily_covers": r.avg_daily_covers,
-                    "reliability_score": r.reliability_score,
-                }
-                for r in rows
-            ]
+        return [
+            {
+                "id": r.id,
+                "name": r.name,
+                "latitude": r.latitude,
+                "longitude": r.longitude,
+                "avg_daily_covers": r.avg_daily_covers,
+                "reliability_score": r.reliability_score,
+            }
+            for r in rows
+        ]
     except Exception:
-        pass
+        return []
     finally:
         db.close()
-
-    return copy.deepcopy(RESTAURANTS)
 
 
 def _get_ngos():
     db = SessionLocal()
     try:
         rows = db.query(NGO).all()
-        if rows:
-            return [
-                {
-                    "id": n.id,
-                    "name": n.name,
-                    "address": n.address,
-                    "latitude": n.latitude,
-                    "longitude": n.longitude,
-                    "capacity": n.capacity,
-                    "current_load": n.current_load,
-                    "urgency_score": n.urgency_score,
-                    "reliability_score": n.reliability_score,
-                    "phone": n.phone,
-                }
-                for n in rows
-            ]
+        return [
+            {
+                "id": n.id,
+                "name": n.name,
+                "address": n.address,
+                "latitude": n.latitude,
+                "longitude": n.longitude,
+                "capacity": n.capacity,
+                "current_load": n.current_load,
+                "urgency_score": n.urgency_score,
+                "reliability_score": n.reliability_score,
+                "phone": n.phone,
+            }
+            for n in rows
+        ]
     except Exception:
-        pass
+        return []
     finally:
         db.close()
-
-    return copy.deepcopy(NGOS)
 
 
 def score_ngo(ngo: dict, restaurant_lat: float, restaurant_lng: float) -> tuple[float, dict]:

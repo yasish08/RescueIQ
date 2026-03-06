@@ -90,7 +90,7 @@ async def startup_event():
         init_db()
         print("[RescueIQ] ✓ PostgreSQL tables initialised")
     except Exception as e:
-        print(f"[RescueIQ] ⚠ DB init skipped ({e}). Running with mock data.")
+        print(f"[RescueIQ] ⚠ DB init skipped ({e}). Backend may run in degraded mode.")
     print("[RescueIQ] Warming up XGBoost model...")
     get_model()
     start_scheduler()

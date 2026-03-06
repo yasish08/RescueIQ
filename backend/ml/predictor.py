@@ -8,8 +8,7 @@ from xgboost import XGBRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error
 
-from seed.mock_data import HISTORICAL_DATA, RESTAURANTS
-from models import Prediction, Restaurant, SessionLocal
+from models import Donation, Prediction, Restaurant, SessionLocal
 
 _model = None
 _feature_cols = ["restaurant_id", "day_of_week", "event_flag", "weather_score", "avg_daily_covers"]
@@ -19,28 +18,41 @@ def _get_restaurants_runtime() -> list[dict]:
     db = SessionLocal()
     try:
         rows = db.query(Restaurant).all()
-        if rows:
-            return [
-                {
-                    "id": row.id,
-                    "name": row.name,
-                    "avg_daily_covers": int(row.avg_daily_covers),
-                }
-                for row in rows
-            ]
+        return [
+            {
+                "id": row.id,
+                "name": row.name,
+                "avg_daily_covers": int(row.avg_daily_covers),
+            }
+            for row in rows
+        ]
     except Exception:
-        pass
+        return []
     finally:
         db.close()
 
-    return [
-        {
-            "id": item["id"],
-            "name": item.get("name", f"Restaurant #{item['id']}"),
-            "avg_daily_covers": int(item.get("avg_daily_covers", 70)),
-        }
-        for item in RESTAURANTS
-    ]
+
+def _bootstrap_from_restaurants() -> pd.DataFrame:
+    restaurants = _get_restaurants_runtime()
+    if not restaurants:
+        return pd.DataFrame()
+
+    records = []
+    for restaurant in restaurants:
+        covers = int(restaurant.get("avg_daily_covers", 70) or 70)
+        baseline_surplus = max(1.0, round(covers * 0.12, 1))
+        for day in range(7):
+            records.append(
+                {
+                    "restaurant_id": restaurant["id"],
+                    "day_of_week": day,
+                    "event_flag": 0,
+                    "weather_score": 0.5,
+                    "avg_daily_covers": covers,
+                    "actual_surplus": baseline_surplus,
+                }
+            )
+    return pd.DataFrame(records)
 
 
 def _build_training_dataframe() -> pd.DataFrame:
@@ -66,17 +78,47 @@ def _build_training_dataframe() -> pd.DataFrame:
                     }
                 )
             return pd.DataFrame(cloud_records)
+
+        donation_rows = (
+            db.query(Donation, Restaurant.avg_daily_covers)
+            .join(Restaurant, Donation.restaurant_id == Restaurant.id)
+            .all()
+        )
+        if donation_rows:
+            donation_records = []
+            for donation, avg_daily_covers in donation_rows:
+                reference_time = donation.pickup_time or donation.created_at
+                day_of_week = reference_time.weekday() if reference_time else 0
+                donation_records.append(
+                    {
+                        "restaurant_id": donation.restaurant_id,
+                        "day_of_week": day_of_week,
+                        "event_flag": 0,
+                        "weather_score": 0.5,
+                        "avg_daily_covers": avg_daily_covers,
+                        "actual_surplus": float(donation.food_quantity or 0),
+                    }
+                )
+            return pd.DataFrame(donation_records)
     except Exception as exc:
-        print(f"[ML] Falling back to seed data (cloud training load failed: {exc})")
+        print(f"[ML] Training data load fallback activated: {exc}")
     finally:
         db.close()
 
-    return pd.DataFrame(HISTORICAL_DATA)
+    return _bootstrap_from_restaurants()
 
 
 def _train_model():
     global _model
     df = _build_training_dataframe()
+    if df.empty:
+        raise RuntimeError("No training data available. Add restaurants/donations first.")
+
+    if len(df) < 5:
+        restaurants_df = _bootstrap_from_restaurants()
+        if not restaurants_df.empty:
+            df = pd.concat([df, restaurants_df], ignore_index=True)
+
     X = df[_feature_cols]
     y = df["actual_surplus"]
 
@@ -127,8 +169,7 @@ def _get_avg_daily_covers(restaurant_id: int) -> int:
     finally:
         db.close()
 
-    fallback = next((restaurant for restaurant in restaurants if restaurant["id"] == restaurant_id), None)
-    return fallback["avg_daily_covers"] if fallback else 70
+    return 70
 
 
 def _get_restaurant_name(restaurant_id: int) -> str:

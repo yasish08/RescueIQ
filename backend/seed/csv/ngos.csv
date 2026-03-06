@@ -1,6 +1,0 @@
-id,name,address,latitude,longitude,capacity,current_load,urgency_score,reliability_score,phone,created_at
-1,Akshaya Patra,"Rajajinagar, Bangalore",13.0067,77.5525,500,120,0.9,0.95,+91-80-2328-0001,2026-03-05T15:53:26.077293+00:00
-2,Robin Hood Army,"Koramangala, Bangalore",12.9279,77.6271,200,80,0.75,0.88,+91-99001-12345,2026-03-05T15:53:26.077308+00:00
-3,Feeding India,"BTM Layout, Bangalore",12.9166,77.6101,300,200,0.85,0.9,+91-80-4567-8901,2026-03-05T15:53:26.077317+00:00
-4,No Food Waste,"HSR Layout, Bangalore",12.9116,77.6389,150,30,0.6,0.8,+91-98765-43210,2026-03-05T15:53:26.077325+00:00
-5,Smile Foundation,"Marathahalli, Bangalore",12.9591,77.6972,250,100,0.7,0.85,+91-80-1234-5678,2026-03-05T15:53:26.077331+00:00

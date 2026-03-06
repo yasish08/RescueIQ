@@ -4,17 +4,13 @@ from typing import Optional
 from datetime import date, datetime
 from math import asin, cos, radians, sin, sqrt
 import time
-import copy
 from sqlalchemy import func
-from seed.mock_data import DONATIONS, RESTAURANTS, NGOS
 from services.google_maps import places_nearby_search_sync
 from models import Donation, DonationStatus, NGO, Prediction, Restaurant, SessionLocal
 
 router = APIRouter(prefix="/donations", tags=["Donations"])
 
-# In-memory store (mirrors real DB structure)
-_donations = copy.deepcopy(DONATIONS)
-_next_id = len(_donations) + 1
+_next_id = 1
 
 
 class DonationCreate(BaseModel):
@@ -182,23 +178,8 @@ def list_donations(status: Optional[str] = None, restaurant_id: Optional[int] = 
         if ngo_id:
             result = [d for d in result if d.get("ngo_id") == ngo_id]
         return result
-    except Exception:
-        result = _donations
-        if status:
-            result = [d for d in result if d["status"] == status]
-        if restaurant_id:
-            result = [d for d in result if d["restaurant_id"] == restaurant_id]
-        if ngo_id:
-            result = [d for d in result if d.get("ngo_id") == ngo_id]
-        enriched = []
-        for d in result:
-            entry = dict(d)
-            rest = next((r for r in RESTAURANTS if r["id"] == d["restaurant_id"]), {})
-            ngo = next((n for n in NGOS if n["id"] == d.get("ngo_id")), {})
-            entry["restaurant_name"] = rest.get("name", "Unknown")
-            entry["ngo_name"] = ngo.get("name", "Unmatched")
-            enriched.append(entry)
-        return enriched
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not list donations: {exc}")
     finally:
         db.close()
 
@@ -220,13 +201,13 @@ def get_donation(donation_id: int):
                 "notes": donation.notes,
                 "created_at": donation.created_at.isoformat() if donation.created_at else None,
             }
+        raise HTTPException(status_code=404, detail="Donation not found")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not load donation: {exc}")
     finally:
         db.close()
-
-    donation = next((d for d in _donations if d["id"] == donation_id), None)
-    if not donation:
-        raise HTTPException(status_code=404, detail="Donation not found")
-    return donation
 
 
 @router.post("", status_code=201)
@@ -257,7 +238,6 @@ def create_donation(body: DonationCreate):
     }
     suggested_ngo = None
 
-    _donations.append(new)
     _next_id += 1
 
     db = SessionLocal()
@@ -422,7 +402,6 @@ def create_ngo_request(body: NGORequestCreate):
                 "predicted_surplus": target["predicted_surplus"],
             }
 
-            _donations.append(new)
             created_requests.append(new)
             _next_id += 1
 
@@ -467,21 +446,10 @@ def create_ngo_request(body: NGORequestCreate):
 
 @router.patch("/{donation_id}")
 def update_donation(donation_id: int, body: DonationUpdate):
-    donation = next((d for d in _donations if d["id"] == donation_id), None)
-    if donation:
-        if body.status:
-            donation["status"] = body.status
-        if body.ngo_id:
-            donation["ngo_id"] = body.ngo_id
-        if body.notes:
-            donation["notes"] = body.notes
-
     db = SessionLocal()
     try:
         db_donation = db.get(Donation, donation_id)
         if not db_donation:
-            if donation:
-                return donation
             raise HTTPException(status_code=404, detail="Donation not found")
         if body.status:
             db_donation.status = DonationStatus(body.status)
@@ -508,9 +476,8 @@ def update_donation(donation_id: int, body: DonationUpdate):
     except HTTPException:
         db.rollback()
         raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not update donation: {exc}")
     finally:
         db.close()
-
-    if donation:
-        return donation
-    raise HTTPException(status_code=404, detail="Donation not found")

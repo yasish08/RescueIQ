@@ -451,10 +451,10 @@ export default function RestaurantProfile() {
       <div className="glass" style={{ padding: '1.5rem', marginBottom: '1.5rem', borderRadius: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '1rem' }}>
           <FiShield color="#22c55e" size={18} />
-          <h2 style={{ fontWeight: 700, fontSize: '1.05rem' }}>GSTIN Verification <span style={{ fontSize: '0.72rem', color: '#475569', fontWeight: 500 }}>(Mock Validator)</span></h2>
+          <h2 style={{ fontWeight: 700, fontSize: '1.05rem' }}>GSTIN Verification</h2>
         </div>
         <p style={{ color: '#64748b', fontSize: '0.85rem', marginBottom: '1rem', lineHeight: 1.6 }}>
-          Enter your GSTIN to verify business identity. Use <code style={{ color: '#86efac', background: 'rgba(34,197,94,0.1)', padding: '1px 6px', borderRadius: 4 }}>22AAAAA0000A1Z5</code> for a demo pass.
+          Enter your GSTIN to validate format and business identity details.
         </p>
         <div style={{ display: 'flex', gap: 8 }}>
           <input
