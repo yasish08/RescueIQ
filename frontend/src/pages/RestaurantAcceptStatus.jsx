@@ -5,6 +5,7 @@ import { api } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 
 const STATUS_FILTERS = ['all', 'matched', 'accepted', 'picked_up', 'delivered', 'pending']
+const SOURCE_FILTERS = ['all', 'restaurant_donations', 'ngo_requests']
 const POLL_INTERVAL_MS = 5_000
 
 function isNgoRequest(item) {
@@ -23,6 +24,7 @@ export default function RestaurantAcceptStatus() {
   const { restaurantId } = useAuth()
   const [items, setItems] = useState([])
   const [filter, setFilter] = useState('all')
+  const [sourceFilter, setSourceFilter] = useState('all')
   const [loading, setLoading] = useState(false)
 
   async function fetchStatus(silent = false) {
@@ -30,8 +32,7 @@ export default function RestaurantAcceptStatus() {
     if (!silent) setLoading(true)
     try {
       const data = await api.getDonations({ restaurant_id: restaurantId })
-      const requestItems = (data || []).filter(isNgoRequest)
-      setItems(requestItems)
+      setItems(data || [])
     } catch {
       if (!silent) setItems([])
     }
@@ -48,8 +49,13 @@ export default function RestaurantAcceptStatus() {
   }, [restaurantId]) // eslint-disable-line
 
   const filtered = useMemo(
-    () => (filter === 'all' ? items : items.filter(item => item.status === filter)),
-    [items, filter]
+    () => {
+      const byStatus = filter === 'all' ? items : items.filter(item => item.status === filter)
+      if (sourceFilter === 'all') return byStatus
+      if (sourceFilter === 'ngo_requests') return byStatus.filter(isNgoRequest)
+      return byStatus.filter(item => !isNgoRequest(item))
+    },
+    [items, filter, sourceFilter]
   )
 
   if (!restaurantId) {
@@ -67,7 +73,9 @@ export default function RestaurantAcceptStatus() {
           <h1 style={{ fontSize: '1.8rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 10 }}>
             <FiClock color="#22c55e" /> Request <span className="gradient-text">Status</span>
           </h1>
-          <p style={{ color: '#64748b', marginTop: 6 }}>Track current status of NGO requests assigned to your restaurant.</p>
+          <p style={{ color: '#64748b', marginTop: 6 }}>
+            Track status for both donations created by your restaurant and NGO requests assigned to your restaurant.
+          </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <Link to="/accept" className="btn-secondary" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>
@@ -77,6 +85,28 @@ export default function RestaurantAcceptStatus() {
             <FiRefreshCw size={15} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} /> Refresh
           </button>
         </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+        {SOURCE_FILTERS.map(source => (
+          <button
+            key={source}
+            onClick={() => setSourceFilter(source)}
+            style={{
+              padding: '0.35rem 0.8rem',
+              borderRadius: 999,
+              border: `1px solid ${sourceFilter === source ? '#60a5fa' : 'rgba(255,255,255,0.1)'}`,
+              background: sourceFilter === source ? 'rgba(96,165,250,0.14)' : 'transparent',
+              color: sourceFilter === source ? '#93c5fd' : '#94a3b8',
+              textTransform: 'capitalize',
+              cursor: 'pointer',
+              fontSize: '0.76rem',
+              fontWeight: 600,
+            }}
+          >
+            {source.replace('_', ' ')}
+          </button>
+        ))}
       </div>
 
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
@@ -111,9 +141,15 @@ export default function RestaurantAcceptStatus() {
             <div key={item.id} className="glass" style={{ padding: '0.95rem 1rem', borderRadius: 12, borderLeft: `3px solid ${STATUS_COLOR[item.status] || '#475569'}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
                 <div>
-                  <div style={{ fontWeight: 700 }}>{item.ngo_name || `NGO #${item.ngo_id}`}</div>
+                  <div style={{ fontWeight: 700 }}>{item.ngo_name || `NGO #${item.ngo_id || '—'}`}</div>
                   <div style={{ color: '#94a3b8', fontSize: '0.82rem', marginTop: 3 }}>
                     Request #{item.id} · {item.food_quantity} meals · {item.food_type || 'mixed'}
+                  </div>
+                  <div style={{ color: '#64748b', fontSize: '0.78rem', marginTop: 4 }}>
+                    Source: {isNgoRequest(item) ? 'NGO request accepted by restaurant' : 'Donation created by restaurant'}
+                  </div>
+                  <div style={{ color: '#64748b', fontSize: '0.78rem', marginTop: 2 }}>
+                    Pickup carrier: {item.ngo_name || 'Waiting for NGO assignment'}
                   </div>
                 </div>
                 <span style={{ color: STATUS_COLOR[item.status] || '#94a3b8', fontWeight: 700, textTransform: 'capitalize', fontSize: '0.82rem' }}>

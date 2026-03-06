@@ -9,6 +9,7 @@ from typing import Optional
 from sqlalchemy import func
 
 from models import Donation, NGO, Restaurant, Review, SessionLocal, User
+from services.google_maps import geocode_address_sync
 
 router = APIRouter(prefix="/profile", tags=["Profile"])
 
@@ -21,6 +22,16 @@ def _safe_avg_review_rating(db, user_id: str) -> Optional[float]:
         db.rollback()
         print(f"[Profile] Trust avg review fallback for user {user_id}: {exc}")
         return None
+
+
+def _is_valid_coord(lat, lng) -> bool:
+    if lat is None or lng is None:
+        return False
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return False
+    if abs(lat) < 0.0001 and abs(lng) < 0.0001:
+        return False
+    return True
 
 
 # ── Mock validators ──────────────────────────────────────
@@ -141,8 +152,9 @@ def update_restaurant_profile(user_id: str, body: RestaurantUpdate):
 
         if body.name is not None:
             rest.name = body.name
-        if body.address is not None:
-            rest.address = body.address
+        address_text = body.address.strip() if isinstance(body.address, str) else body.address
+        if address_text is not None:
+            rest.address = address_text
         if body.cuisine_type is not None:
             rest.cuisine_type = body.cuisine_type
         if body.gstin is not None:
@@ -152,6 +164,18 @@ def update_restaurant_profile(user_id: str, body: RestaurantUpdate):
         if body.longitude is not None:
             rest.longitude = body.longitude
 
+        # If only address is updated (without explicit coords), attempt server-side geocoding.
+        if address_text and (body.latitude is None or body.longitude is None):
+            geocoded = geocode_address_sync(address_text)
+            geo_lat = geocoded.get("lat") if geocoded else None
+            geo_lng = geocoded.get("lng") if geocoded else None
+            if _is_valid_coord(geo_lat, geo_lng):
+                rest.latitude = geo_lat
+                rest.longitude = geo_lng
+                formatted = geocoded.get("formatted_address")
+                if formatted:
+                    rest.address = formatted
+
         # Also update user phone if provided
         if body.phone is not None:
             user = db.query(User).filter(User.id == user_id).first()
@@ -159,7 +183,15 @@ def update_restaurant_profile(user_id: str, body: RestaurantUpdate):
                 user.phone = body.phone
 
         db.commit()
-        return {"status": "updated"}
+        return {
+            "status": "updated",
+            "restaurant": {
+                "id": rest.id,
+                "address": rest.address,
+                "latitude": rest.latitude,
+                "longitude": rest.longitude,
+            },
+        }
     except HTTPException:
         db.rollback()
         raise
@@ -251,8 +283,9 @@ def update_ngo_profile(user_id: str, body: NGOUpdate):
 
         if body.name is not None:
             ngo.name = body.name
-        if body.address is not None:
-            ngo.address = body.address
+        address_text = body.address.strip() if isinstance(body.address, str) else body.address
+        if address_text is not None:
+            ngo.address = address_text
         if body.certificate_number is not None:
             ngo.certificate_number = body.certificate_number
         if body.latitude is not None:
@@ -260,13 +293,32 @@ def update_ngo_profile(user_id: str, body: NGOUpdate):
         if body.longitude is not None:
             ngo.longitude = body.longitude
 
+        if address_text and (body.latitude is None or body.longitude is None):
+            geocoded = geocode_address_sync(address_text)
+            geo_lat = geocoded.get("lat") if geocoded else None
+            geo_lng = geocoded.get("lng") if geocoded else None
+            if _is_valid_coord(geo_lat, geo_lng):
+                ngo.latitude = geo_lat
+                ngo.longitude = geo_lng
+                formatted = geocoded.get("formatted_address")
+                if formatted:
+                    ngo.address = formatted
+
         if body.phone is not None:
             user = db.query(User).filter(User.id == user_id).first()
             if user:
                 user.phone = body.phone
 
         db.commit()
-        return {"status": "updated"}
+        return {
+            "status": "updated",
+            "ngo": {
+                "id": ngo.id,
+                "address": ngo.address,
+                "latitude": ngo.latitude,
+                "longitude": ngo.longitude,
+            },
+        }
     except HTTPException:
         db.rollback()
         raise

@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional
+import time
 from geopy.distance import geodesic
 from services.google_maps import (
     geocode_address,
@@ -248,11 +249,28 @@ async def nearby_ngos(body: NearbyNGORequest):
 
     collected_by_place_id: dict[str, dict] = {}
     searched_radius_km = 0
+    search_started_at = time.monotonic()
+    time_budget_sec = 8.0
+
+    keyword_queries = NEARBY_NGO_KEYWORDS
+    text_queries = NEARBY_NGO_TEXT_QUERIES
+    effective_target = target
+
+    # Uncapped mode (target_count=0) can become very slow across all keywords/radii.
+    # Keep it responsive with a practical cap and reduced query set.
+    if effective_target is None:
+        effective_target = 40
+        keyword_queries = NEARBY_NGO_KEYWORDS[:8]
+        text_queries = NEARBY_NGO_TEXT_QUERIES[:2]
 
     radius_km = step_km
-    while radius_km <= max_radius_km and (target is None or len(collected_by_place_id) < target):
+    timed_out = False
+    while radius_km <= max_radius_km and len(collected_by_place_id) < effective_target:
         radius_m = radius_km * 1000
-        for keyword in NEARBY_NGO_KEYWORDS:
+        for keyword in keyword_queries:
+            if (time.monotonic() - search_started_at) > time_budget_sec:
+                timed_out = True
+                break
             results = await places_nearby_search(body.lat, body.lng, radius_m, keyword)
             for place in results:
                 place_id = place.get("place_id")
@@ -282,7 +300,13 @@ async def nearby_ngos(body: NearbyNGORequest):
                         "types": place_types,
                         "source": "google_places",
                     }
-        for query in NEARBY_NGO_TEXT_QUERIES:
+        if timed_out:
+            break
+
+        for query in text_queries:
+            if (time.monotonic() - search_started_at) > time_budget_sec:
+                timed_out = True
+                break
             results = await places_text_search(body.lat, body.lng, radius_m, query)
             for place in results:
                 place_id = place.get("place_id")
@@ -313,6 +337,8 @@ async def nearby_ngos(body: NearbyNGORequest):
                         "source": "google_places_text",
                     }
         searched_radius_km = radius_km
+        if timed_out:
+            break
         radius_km += step_km
 
     ngos = sorted(collected_by_place_id.values(), key=lambda item: item["distance_km"])
@@ -343,4 +369,5 @@ async def nearby_ngos(body: NearbyNGORequest):
         "searched_radius_km": searched_radius_km,
         "target_count": target or 0,
         "step_km": step_km,
+        "partial_results": timed_out,
     }

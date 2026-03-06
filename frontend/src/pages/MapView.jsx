@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import {
-  GoogleMap, useJsApiLoader, Marker, InfoWindow,
+  GoogleMap, useJsApiLoader, OverlayView, InfoWindow,
   DirectionsRenderer, Circle,
 } from '@react-google-maps/api'
 import { FiRefreshCw, FiLayers, FiNavigation } from 'react-icons/fi'
@@ -25,7 +25,7 @@ const MAP_STYLE = [
 ]
 
 const CENTER = { lat: 20.5937, lng: 78.9629 }  // India fallback
-const NGO_RANGE_KM = 5
+const NGO_RANGE_DEFAULT_KM = 5
 
 export default function MapView() {
   const { user, restaurantId } = useAuth()
@@ -36,7 +36,6 @@ export default function MapView() {
   })
 
   const mapRef = useRef(null)
-  const watchIdRef = useRef(null)
   const autoLocateAttemptedRef = useRef(false)
   const [pins, setPins] = useState({ restaurants: [], ngos: [], routes: [] })
   const [nearbyNgos, setNearbyNgos] = useState([])
@@ -47,12 +46,12 @@ export default function MapView() {
   const [showRestaurants, setShowRestaurants] = useState(true)
   const [showNGOs, setShowNGOs] = useState(true)
   const [loading, setLoading] = useState(false)
+  const [ngoRangeKm, setNgoRangeKm] = useState(NGO_RANGE_DEFAULT_KM)
   const [userLocation, setUserLocation] = useState(null)
   const [referenceLocation, setReferenceLocation] = useState(null)
   const [locationAccuracy, setLocationAccuracy] = useState(null)
-  const [watchingLocation, setWatchingLocation] = useState(false)
   const [geoError, setGeoError] = useState('')
-  const activeLocation = isDonor ? userLocation : (userLocation || referenceLocation)
+  const activeLocation = isDonor ? referenceLocation : (userLocation || referenceLocation)
   const mapCanvasHeight = 'calc(100% - (70px + env(safe-area-inset-bottom)))'
   const mapViewportHeight = 'calc(100dvh - var(--top-bar-height) - env(safe-area-inset-top))'
 
@@ -132,14 +131,16 @@ export default function MapView() {
   const applyLocation = useCallback((coords) => {
     const next = { lat: coords.latitude, lng: coords.longitude }
     setUserLocation(next)
-    setReferenceLocation(next)
+    if (!isDonor) {
+      setReferenceLocation(next)
+    }
     setLocationAccuracy(coords.accuracy ?? null)
     setGeoError('')
     if (mapRef.current) {
       mapRef.current.panTo(next)
       mapRef.current.setZoom(14)
     }
-  }, [])
+  }, [isDonor])
 
   const locateNow = useCallback(() => {
     if (!navigator.geolocation) {
@@ -156,10 +157,11 @@ export default function MapView() {
   useEffect(() => {
     if (autoLocateAttemptedRef.current) return
     if (!isLoaded) return
+    if (isDonor) return
     if (userLocation) return
     autoLocateAttemptedRef.current = true
     locateNow()
-  }, [isLoaded, userLocation, locateNow])
+  }, [isLoaded, userLocation, locateNow, isDonor])
 
   useEffect(() => {
     if (!isDonor) {
@@ -171,8 +173,8 @@ export default function MapView() {
     const base = activeLocation
     if (!base) return
 
-    const maxRadiusKm = NGO_RANGE_KM
-    api.nearbyNGOs(base.lat, base.lng, 0, 10, maxRadiusKm)
+    const maxRadiusKm = ngoRangeKm
+    api.nearbyNGOs(base.lat, base.lng, 25, 5, maxRadiusKm)
       .then((result) => {
         const backendNgos = result?.ngos || []
         setNearbyNgos(backendNgos)
@@ -185,42 +187,7 @@ export default function MapView() {
         setNearbyNgos([])
         setNearbyMeta(null)
       })
-  }, [isDonor, activeLocation])
-
-  const stopLiveLocation = useCallback(() => {
-    if (watchIdRef.current != null) {
-      navigator.geolocation.clearWatch(watchIdRef.current)
-      watchIdRef.current = null
-    }
-    setWatchingLocation(false)
-  }, [])
-
-  const startLiveLocation = useCallback(() => {
-    if (!navigator.geolocation) {
-      setGeoError('Geolocation is not supported on this device/browser.')
-      return
-    }
-    if (watchIdRef.current != null) return
-
-    const watchId = navigator.geolocation.watchPosition(
-      (position) => applyLocation(position.coords),
-      (error) => {
-        setGeoError(parseGeoError(error, 'Live location tracking failed.'))
-        stopLiveLocation()
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-    )
-    watchIdRef.current = watchId
-    setWatchingLocation(true)
-  }, [applyLocation, stopLiveLocation, parseGeoError])
-
-  useEffect(() => {
-    return () => {
-      if (watchIdRef.current != null && navigator.geolocation) {
-        navigator.geolocation.clearWatch(watchIdRef.current)
-      }
-    }
-  }, [])
+  }, [isDonor, activeLocation, ngoRangeKm])
 
   const ngoSource = useMemo(() => {
     if (!isDonor) return pins.ngos || []
@@ -250,8 +217,8 @@ export default function MapView() {
     const lng = ngo.lng ?? ngo.longitude
     if (!isValidCoord(lat, lng)) return false
     const point = { lat, lng }
-    return haversineKm(base, point) <= NGO_RANGE_KM
-  }), [ngoSource, isDonor, activeLocation, isValidCoord, haversineKm])
+    return haversineKm(base, point) <= ngoRangeKm
+  }), [ngoSource, isDonor, activeLocation, isValidCoord, haversineKm, ngoRangeKm])
 
   const restaurantsInRange = useMemo(() => {
     const base = activeLocation
@@ -263,7 +230,7 @@ export default function MapView() {
       const lat = restaurant.lat ?? restaurant.latitude
       const lng = restaurant.lng ?? restaurant.longitude
       if (!isValidCoord(lat, lng)) return false
-      return haversineKm(base, { lat, lng }) <= NGO_RANGE_KM
+      return haversineKm(base, { lat, lng }) <= ngoRangeKm
     })
 
     if (inRange.length) return inRange
@@ -278,6 +245,7 @@ export default function MapView() {
     activeLocation,
     isValidCoord,
     haversineKm,
+    ngoRangeKm,
     restaurantId,
   ])
 
@@ -294,10 +262,10 @@ export default function MapView() {
       const toLat = to.lat ?? to.latitude
       const toLng = to.lng ?? to.longitude
       if (!isValidCoord(fromLat, fromLng) || !isValidCoord(toLat, toLng)) return false
-      return haversineKm(base, { lat: fromLat, lng: fromLng }) <= NGO_RANGE_KM
-        || haversineKm(base, { lat: toLat, lng: toLng }) <= NGO_RANGE_KM
+      return haversineKm(base, { lat: fromLat, lng: fromLng }) <= ngoRangeKm
+        || haversineKm(base, { lat: toLat, lng: toLng }) <= ngoRangeKm
     })
-  }, [pins.routes, isDonor, activeLocation, haversineKm, isValidCoord])
+  }, [pins.routes, isDonor, activeLocation, haversineKm, isValidCoord, ngoRangeKm])
 
   const visibleRestaurantCoords = useMemo(() => new Set(
     (restaurantsInRange || []).map((restaurant) => {
@@ -420,7 +388,7 @@ export default function MapView() {
         <GoogleMap
           onLoad={onLoad}
           mapContainerStyle={{ width: '100%', height: '100%' }}
-          center={isDonor ? (userLocation || CENTER) : (userLocation || referenceLocation || CENTER)}
+          center={activeLocation || (isDonor ? CENTER : (userLocation || CENTER))}
           zoom={13}
           options={{
             styles: MAP_STYLE,
@@ -432,30 +400,62 @@ export default function MapView() {
         >
         {/* Restaurant markers */}
         {showRestaurants && restaurantsInRange?.map(r => (
-          <Marker
+          <OverlayView
             key={`r-${r.id}`}
             position={{ lat: r.lat ?? r.latitude, lng: r.lng ?? r.longitude }}
-            onClick={() => setSelected({ ...r, type: 'restaurant' })}
-            icon={{
-              url: `data:image/svg+xml;utf-8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%2322c55e' opacity='0.95'/><text x='16' y='21' text-anchor='middle' font-size='14' font-family='Arial' fill='white' font-weight='700'>R</text></svg>`,
-              scaledSize: new window.google.maps.Size(36, 36),
-              anchor: new window.google.maps.Point(18, 18),
-            }}
-          />
+            mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
+          >
+            <button
+              type="button"
+              onClick={() => setSelected({ ...r, type: 'restaurant' })}
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: '50%',
+                border: '2px solid #ffffff',
+                background: '#22c55e',
+                color: '#ffffff',
+                fontSize: '13px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                transform: 'translate(-16px, -16px)',
+                boxShadow: '0 0 0 4px rgba(34,197,94,0.2)',
+              }}
+              aria-label={`Restaurant ${r.name}`}
+            >
+              R
+            </button>
+          </OverlayView>
         ))}
 
         {/* NGO markers */}
         {showNGOs && ngosInRange.map(n => (
-          <Marker
+          <OverlayView
             key={`n-${n.id}`}
             position={{ lat: n.lat ?? n.latitude, lng: n.lng ?? n.longitude }}
-            onClick={() => setSelected({ ...n, type: 'ngo' })}
-            icon={{
-              url: `data:image/svg+xml;utf-8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23c084fc' opacity='0.95'/><text x='16' y='21' text-anchor='middle' font-size='14' font-family='Arial' fill='white' font-weight='700'>N</text></svg>`,
-              scaledSize: new window.google.maps.Size(36, 36),
-              anchor: new window.google.maps.Point(18, 18),
-            }}
-          />
+            mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
+          >
+            <button
+              type="button"
+              onClick={() => setSelected({ ...n, type: 'ngo' })}
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: '50%',
+                border: '2px solid #ffffff',
+                background: '#c084fc',
+                color: '#ffffff',
+                fontSize: '13px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                transform: 'translate(-16px, -16px)',
+                boxShadow: '0 0 0 4px rgba(192,132,252,0.2)',
+              }}
+              aria-label={`NGO ${n.name}`}
+            >
+              N
+            </button>
+          </OverlayView>
         ))}
 
         {/* Driving routes */}
@@ -477,14 +477,23 @@ export default function MapView() {
         {/* Current user marker + accuracy circle */}
         {userLocation && (
           <>
-            <Marker
+            <OverlayView
               position={userLocation}
-              icon={{
-                url: `data:image/svg+xml;utf-8,<svg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'><circle cx='14' cy='14' r='11' fill='%2338bdf8' opacity='0.95'/><circle cx='14' cy='14' r='4' fill='white'/></svg>`,
-                scaledSize: new window.google.maps.Size(28, 28),
-                anchor: new window.google.maps.Point(14, 14),
-              }}
-            />
+              mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
+            >
+              <div
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: '50%',
+                  background: '#38bdf8',
+                  border: '2px solid #ffffff',
+                  transform: 'translate(-10px, -10px)',
+                  boxShadow: '0 0 0 4px rgba(56,189,248,0.2)',
+                  pointerEvents: 'none',
+                }}
+              />
+            </OverlayView>
             {locationAccuracy && (
               <Circle
                 center={userLocation}
@@ -552,14 +561,22 @@ export default function MapView() {
             {label}
           </button>
         ))}
-        <button onClick={fetchPins} style={{
-          marginTop: 4, background: 'transparent', border: '1px solid rgba(255,255,255,0.08)',
-          borderRadius: 8, padding: '4px 10px', cursor: 'pointer', color: '#475569',
-          fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600,
-        }}>
-          <FiRefreshCw size={12} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
-          Refresh
-        </button>
+        {isDonor && (
+          <div style={{ marginTop: 2 }}>
+            <div style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600, marginBottom: 4 }}>
+              NGO Range: {ngoRangeKm} km
+            </div>
+            <input
+              type="range"
+              min={5}
+              max={100}
+              step={5}
+              value={ngoRangeKm}
+              onChange={(e) => setNgoRangeKm(Number(e.target.value))}
+              style={{ width: 190, accentColor: '#c084fc' }}
+            />
+          </div>
+        )}
         <button onClick={locateNow} style={{
           background: 'transparent', border: '1px solid rgba(255,255,255,0.08)',
           borderRadius: 8, padding: '4px 10px', cursor: 'pointer', color: '#38bdf8',
@@ -568,23 +585,14 @@ export default function MapView() {
           <FiNavigation size={12} />
           My Location
         </button>
-        <button onClick={watchingLocation ? stopLiveLocation : startLiveLocation} style={{
-          background: watchingLocation ? 'rgba(56,189,248,0.15)' : 'transparent',
-          border: `1px solid ${watchingLocation ? '#38bdf8' : 'rgba(255,255,255,0.08)'}`,
-          borderRadius: 8, padding: '4px 10px', cursor: 'pointer', color: watchingLocation ? '#38bdf8' : '#475569',
-          fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600,
-        }}>
-          <FiNavigation size={12} />
-          {watchingLocation ? 'Stop Live' : 'Start Live'}
-        </button>
         {geoError && (
           <div style={{ color: '#f87171', fontSize: '0.72rem', lineHeight: 1.4, maxWidth: 190 }}>
             {geoError}
           </div>
         )}
-        {isDonor && !(userLocation || referenceLocation) && !geoError && (
+        {isDonor && !referenceLocation && !geoError && (
           <div style={{ color: '#94a3b8', fontSize: '0.72rem', lineHeight: 1.4, maxWidth: 190 }}>
-            Allow location to view nearby NGOs within 5 km.
+            Add restaurant location in Profile to view nearby NGOs within {ngoRangeKm} km.
           </div>
         )}
       </div>
@@ -597,7 +605,7 @@ export default function MapView() {
         fontSize: '0.75rem', display: 'flex', flexDirection: 'column', gap: 6, pointerEvents: 'auto',
       }}>
         <div style={{ color: '#22c55e', fontWeight: 600 }}>Restaurant (donating)</div>
-        <div style={{ color: '#c084fc', fontWeight: 600 }}>NGO (within {NGO_RANGE_KM} km)</div>
+        <div style={{ color: '#c084fc', fontWeight: 600 }}>NGO (within {ngoRangeKm} km)</div>
         <div style={{ color: '#f59e0b', fontWeight: 600 }}>Accepted order route</div>
         {isDonor && nearbyMeta && (
           <div style={{ color: '#94a3b8' }}>

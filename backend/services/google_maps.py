@@ -105,6 +105,31 @@ async def geocode_address(address: str) -> dict | None:
     return None
 
 
+def geocode_address_sync(address: str) -> dict | None:
+    """Synchronous geocode helper for non-async router paths."""
+    import httpx as _httpx
+
+    if not GOOGLE_MAPS_API_KEY:
+        return None
+    try:
+        r = _httpx.get(f"{BASE}/geocode/json", params={
+            "address": address,
+            "region": "in",
+            "key": GOOGLE_MAPS_API_KEY,
+        }, timeout=5.0)
+        data = r.json()
+        if data.get("results"):
+            loc = data["results"][0]["geometry"]["location"]
+            return {
+                "lat": loc["lat"],
+                "lng": loc["lng"],
+                "formatted_address": data["results"][0].get("formatted_address"),
+            }
+    except Exception as e:
+        print(f"[Google Maps] Sync geocoding failed: {e}")
+    return None
+
+
 async def places_autocomplete(query: str, location: str = "12.9716,77.5946", radius: int = 20000) -> list:
     """
     Return place suggestions using the Places Autocomplete API.
@@ -180,7 +205,7 @@ async def places_nearby_search(lat: float, lng: float, radius_m: int, keyword: s
         return []
 
 
-def places_nearby_search_sync(lat: float, lng: float, radius_m: int, keyword: str) -> list[dict]:
+def places_nearby_search_sync(lat: float, lng: float, radius_m: int, keyword: str, timeout_sec: float = 8.0) -> list[dict]:
     """Synchronous nearby places search for non-async code paths."""
     if not GOOGLE_MAPS_API_KEY:
         return []
@@ -195,7 +220,7 @@ def places_nearby_search_sync(lat: float, lng: float, radius_m: int, keyword: st
                 "keyword": keyword,
                 "key": GOOGLE_MAPS_API_KEY,
             },
-            timeout=8.0,
+            timeout=timeout_sec,
         )
         data = r.json()
         return data.get("results", [])

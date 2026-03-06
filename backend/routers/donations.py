@@ -3,13 +3,12 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import date, datetime
 from math import asin, cos, radians, sin, sqrt
+import time
 import copy
 from sqlalchemy import func
 from seed.mock_data import DONATIONS, RESTAURANTS, NGOS
-from services.matching import match_ngo
-from services.google_maps import places_nearby_search_sync, get_driving_distance_sync
+from services.google_maps import places_nearby_search_sync
 from models import Donation, DonationStatus, NGO, Prediction, Restaurant, SessionLocal
-from ml.predictor import retrain_model
 
 router = APIRouter(prefix="/donations", tags=["Donations"])
 
@@ -83,10 +82,22 @@ def _parse_pickup_time(value: Optional[str]) -> Optional[datetime]:
     raise HTTPException(status_code=400, detail="pickup_time must be ISO datetime or HH:MM")
 
 
-def _suggest_nearby_ngo(lat: float, lng: float, radius_km: int = 15) -> Optional[dict]:
+def _suggest_nearby_ngo(
+    lat: float,
+    lng: float,
+    radius_km: int = 15,
+    max_keywords: int = 1,
+    max_duration_sec: float = 3.0,
+) -> Optional[dict]:
     collected: dict[str, dict] = {}
-    for keyword in _NEARBY_NGO_KEYWORDS:
-        for place in places_nearby_search_sync(lat, lng, radius_km * 1000, keyword):
+    started_at = time.monotonic()
+    keywords = _NEARBY_NGO_KEYWORDS[:max(1, max_keywords)]
+    for keyword in keywords:
+        if time.monotonic() - started_at > max_duration_sec:
+            break
+        for place in places_nearby_search_sync(lat, lng, radius_km * 1000, keyword, timeout_sec=1.2):
+            if time.monotonic() - started_at > max_duration_sec:
+                break
             place_id = place.get("place_id")
             if not place_id:
                 continue
@@ -96,8 +107,7 @@ def _suggest_nearby_ngo(lat: float, lng: float, radius_km: int = 15) -> Optional
             if p_lat is None or p_lng is None:
                 continue
 
-            dist_info = get_driving_distance_sync(lat, lng, p_lat, p_lng)
-            distance_km = float(dist_info.get("distance_km", 999))
+            distance_km = _haversine_km(lat, lng, p_lat, p_lng)
             rating = float(place.get("rating") or 0.0)
 
             # Distance-heavy ranking with rating tie-break.
@@ -113,8 +123,8 @@ def _suggest_nearby_ngo(lat: float, lng: float, radius_km: int = 15) -> Optional
                 "lat": p_lat,
                 "lng": p_lng,
                 "distance_km": distance_km,
-                "distance_text": dist_info.get("distance_text"),
-                "duration_text": dist_info.get("duration_text"),
+                "distance_text": f"{round(distance_km, 1)} km",
+                "duration_text": None,
                 "rating": rating if rating > 0 else None,
                 "source": "google_places_suggestion",
                 "score": score,
@@ -245,17 +255,7 @@ def create_donation(body: DonationCreate):
         "status": "pending",
         "created_at": created_at.isoformat(),
     }
-    matched_ngo = None
     suggested_ngo = None
-    if body.auto_match:
-        try:
-            match_result = match_ngo(body.restaurant_id, body.food_quantity)
-            best = match_result["matched_ngo"]
-            # Suggest only; do not auto-assign NGO.
-            suggested_ngo = best
-            matched_ngo = None
-        except Exception as e:
-            print(f"[WARNING] Auto-match failed: {e}")
 
     _donations.append(new)
     _next_id += 1
@@ -277,7 +277,16 @@ def create_donation(body: DonationCreate):
             suggest_lng = body.pickup_lng
 
         if suggest_lat is not None and suggest_lng is not None:
-            suggested_ngo = suggested_ngo or _suggest_nearby_ngo(suggest_lat, suggest_lng, radius_km=20)
+            try:
+                suggested_ngo = suggested_ngo or _suggest_nearby_ngo(
+                    suggest_lat,
+                    suggest_lng,
+                    radius_km=12,
+                    max_keywords=1,
+                    max_duration_sec=1.8,
+                )
+            except Exception as suggestion_exc:
+                print(f"[Donation] Nearby NGO suggestion skipped: {suggestion_exc}")
 
         pickup_time_value = _parse_pickup_time(body.pickup_time)
 
@@ -305,7 +314,6 @@ def create_donation(body: DonationCreate):
         )
         db.add(training_row)
         db.commit()
-        retrain_model()
     except HTTPException:
         db.rollback()
         raise

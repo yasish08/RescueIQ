@@ -7,6 +7,24 @@ import { useAuth } from '../context/AuthContext'
 
 const STATUS_FILTERS = ['all', 'matched', 'accepted', 'picked_up', 'delivered', 'pending']
 const POLL_INTERVAL_MS = 5_000
+const ACTIONABLE_STATUSES = new Set(['pending', 'matched', 'accepted', 'picked_up'])
+
+function isUpcomingDonation(item) {
+  if (!item || !ACTIONABLE_STATUSES.has(item.status)) return false
+
+  const now = Date.now()
+  const pickupTs = item.pickup_time ? Date.parse(item.pickup_time) : NaN
+  if (!Number.isNaN(pickupTs)) {
+    return pickupTs >= now - (2 * 60 * 60 * 1000)
+  }
+
+  const createdTs = item.created_at ? Date.parse(item.created_at) : NaN
+  if (!Number.isNaN(createdTs)) {
+    return createdTs >= now - (36 * 60 * 60 * 1000)
+  }
+
+  return false
+}
 
 export default function NGOView() {
   const { ngoId } = useAuth()
@@ -23,7 +41,8 @@ export default function NGOView() {
       const scoped = ngoId
         ? data.filter(item => item.ngo_id === ngoId || (!item.ngo_id && (item.status === 'pending' || item.status === 'matched')))
         : data
-      const newCount = scoped.length
+      const upcomingOnly = scoped.filter(isUpcomingDonation)
+      const newCount = upcomingOnly.length
       const prevCount = prevCountRef.current
       if (newCount > prevCount) {
         const diff = newCount - prevCount
@@ -33,7 +52,7 @@ export default function NGOView() {
         setTimeout(() => setToast(null), 5000)
       }
       prevCountRef.current = newCount
-      setDonations(scoped)
+      setDonations(upcomingOnly)
     } catch {
       if (!silent) pushNotification('Could not refresh donations', 'error')
     }
@@ -86,7 +105,7 @@ export default function NGOView() {
             <FiHeart color="#22c55e" /> Pickup <span className="gradient-text">Requests</span>
           </h1>
           <p style={{ color: '#64748b', marginTop: 6 }}>
-            Accept and manage incoming food donations assigned to your NGO.
+            As pickup carrier, accept and update only upcoming requests (accepted → picked up → delivered).
           </p>
         </div>
         <button className="btn-secondary" onClick={() => fetchDonations()} disabled={loading}>
